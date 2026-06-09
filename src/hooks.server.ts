@@ -4,5 +4,11 @@ import { building } from "$app/environment";
 import type { Handle } from "@sveltejs/kit";
 
 export const handle: Handle = async ({ event, resolve }) => {
+  // Resolve the current session once per request and expose it to load
+  // functions / actions via event.locals (used by the dashboard guard).
+  const session = await auth.api.getSession({ headers: event.request.headers });
+  event.locals.user = session?.user ?? null;
+  event.locals.session = session?.session ?? null;
+
   return svelteKitHandler({ event, resolve, auth, building });
 };

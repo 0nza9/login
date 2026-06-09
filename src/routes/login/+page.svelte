@@ -1,20 +1,32 @@
 <script lang="ts">
   import { signUp } from "$lib/sign-up";
+  import { signIn } from "$lib/sign-in";
   import { goto } from "$app/navigation";
 
+  let mode = $state<"signin" | "signup">("signin");
   let email = $state("");
   let password = $state("");
   let loading = $state(false);
   let errorMessage = $state("");
+
+  function toggleMode() {
+    mode = mode === "signin" ? "signup" : "signin";
+    errorMessage = "";
+  }
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
     errorMessage = "";
     loading = true;
 
-    // No name field on this form — derive a default from the email.
-    const name = email.split("@")[0];
-    const { error } = await signUp(email, password, name);
+    let error;
+    if (mode === "signup") {
+      // No name field on this form — derive a default from the email.
+      const name = email.split("@")[0];
+      ({ error } = await signUp(email, password, name));
+    } else {
+      ({ error } = await signIn(email, password));
+    }
 
     loading = false;
 
@@ -23,7 +35,7 @@
       return;
     }
 
-    // Signed in automatically after sign-up — go to the dashboard.
+    // Signed in (new account is signed in automatically) — go to the dashboard.
     await goto("/dashboard");
   }
 </script>
@@ -33,7 +45,7 @@
 
     <form class="card-body" onsubmit={handleSubmit}>
       <h1 class="card-title justify-center text-2xl">
-        Create account
+        {mode === "signin" ? "Sign in" : "Create account"}
       </h1>
 
       <label class="form-control w-full">
@@ -72,10 +84,17 @@
           {#if loading}
             <span class="loading loading-spinner"></span>
           {:else}
-            Sign up
+            {mode === "signin" ? "Sign in" : "Sign up"}
           {/if}
         </button>
       </div>
+
+      <p class="mt-2 text-center text-sm text-base-content/60">
+        {mode === "signin" ? "Don't have an account?" : "Already have an account?"}
+        <button type="button" class="link link-primary" onclick={toggleMode}>
+          {mode === "signin" ? "Create one" : "Sign in"}
+        </button>
+      </p>
     </form>
   </div>
 </div>

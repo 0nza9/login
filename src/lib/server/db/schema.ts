@@ -8,6 +8,11 @@ export const user = sqliteTable("user", {
     .notNull()
     .default(false),
   image: text("image"),
+  // Added by the better-auth admin plugin.
+  role: text("role").default("user"),
+  banned: integer("banned", { mode: "boolean" }),
+  banReason: text("banReason"),
+  banExpires: integer("banExpires", { mode: "timestamp" }),
   createdAt: integer("createdAt", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updatedAt", { mode: "timestamp" }).notNull(),
 });
@@ -23,6 +28,8 @@ export const session = sqliteTable("session", {
   userId: text("userId")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  // Added by the better-auth admin plugin (records who is impersonating).
+  impersonatedBy: text("impersonatedBy"),
 });
 
 export const account = sqliteTable("account", {
