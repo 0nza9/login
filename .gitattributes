@@ -1,0 +1,10 @@
+# Normalize line endings: store everything as LF in the repo, and check it out
+# as LF on every OS. Prevents the CRLF<->LF churn that shows up when the same
+# project is edited on both Windows and Linux/WSL.
+* text=auto eol=lf
+
+# Binary files git should never touch.
+*.svg text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
