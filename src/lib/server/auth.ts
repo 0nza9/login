@@ -10,8 +10,13 @@ export const auth = betterAuth({
 
   // localhost and 127.0.0.1 are different origins to the browser. Trust both on
   // the dev port so sign-in works regardless of which one you type (avoids the
-  // "Invalid origin" error).
-  trustedOrigins: ["http://localhost:5175", "http://127.0.0.1:5175"],
+  // "Invalid origin" error). The Vercel production origin is added from
+  // BETTER_AUTH_URL so sign-in works on the deployed site too.
+  trustedOrigins: [
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    ...(env.BETTER_AUTH_URL ? [env.BETTER_AUTH_URL] : []),
+  ],
 
   database: drizzleAdapter(db, {
     provider: "sqlite",
