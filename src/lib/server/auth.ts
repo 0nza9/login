@@ -1,9 +1,17 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { admin } from "better-auth/plugins";
+import { Resend } from "resend";
 import { db } from "./db";
 import * as schema from "./db/schema";
 import { env } from "$env/dynamic/private";
+
+// Resend sends the password-reset emails. Needs RESEND_API_KEY set (local +
+// Vercel). EMAIL_FROM must be an address on a domain you've verified in Resend;
+// the onboarding@resend.dev fallback only delivers to your own Resend account
+// email, so it's for testing only.
+const resend = new Resend(env.RESEND_API_KEY);
+const FROM = env.EMAIL_FROM ?? "onboarding@resend.dev";
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
@@ -25,6 +33,23 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+    // Sent when a user requests a reset from /login. `url` already contains the
+    // reset token and points at our /reset-password page (see redirectTo on the
+    // client). The reset page reads the token and calls resetPassword().
+    sendResetPassword: async ({ user, url }) => {
+      await resend.emails.send({
+        from: FROM,
+        to: user.email,
+        subject: "Reset your password",
+        html: `
+          <p>Hi ${user.name ?? "there"},</p>
+          <p>We received a request to reset your password. Click the link below
+          to choose a new one. If you didn't request this, you can ignore this email.</p>
+          <p><a href="${url}">Reset your password</a></p>
+          <p>This link expires shortly for your security.</p>
+        `,
+      });
+    },
   },
 
   plugins: [
