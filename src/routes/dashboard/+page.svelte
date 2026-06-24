@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { enhance } from "$app/forms";
   import { goto, invalidateAll } from "$app/navigation";
   import { authClient } from "$lib/auth-client";
@@ -45,6 +46,44 @@
     await authClient.signOut();
     await goto("/login");
   }
+
+  // --- Self-service account (every user can edit their own profile) ---------
+  // Seed once from the loaded profile; the field is independently editable after.
+  let name = $state(untrack(() => data.me.name));
+  let savingName = $state(false);
+  async function saveName(e: SubmitEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return notify("error", "Name can't be empty.");
+    savingName = true;
+    const { error } = await authClient.updateUser({ name: trimmed });
+    savingName = false;
+    if (error) return notify("error", error.message ?? "Could not update name.");
+    notify("success", "Name updated.");
+    await invalidateAll();
+  }
+
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let confirmPassword = $state("");
+  let savingPw = $state(false);
+  async function savePassword(e: SubmitEvent) {
+    e.preventDefault();
+    if (newPassword.length < 8)
+      return notify("error", "New password must be at least 8 characters.");
+    if (newPassword !== confirmPassword) return notify("error", "Passwords don't match.");
+    savingPw = true;
+    // revokeOtherSessions signs out this account everywhere else after a change.
+    const { error } = await authClient.changePassword({
+      currentPassword,
+      newPassword,
+      revokeOtherSessions: true,
+    });
+    savingPw = false;
+    if (error) return notify("error", error.message ?? "Could not change password.");
+    notify("success", "Password changed.");
+    currentPassword = newPassword = confirmPassword = "";
+  }
 </script>
 
 <div class="min-h-screen bg-base-200 p-6">
@@ -65,7 +104,66 @@
           <span class="loading loading-spinner loading-sm text-primary"></span>
         {/if}
         <a href="/" class="btn btn-sm btn-ghost">← Back</a>
+        {#if data.isAdmin}
+          <a href="/clients" class="btn btn-sm btn-outline">Clients</a>
+        {/if}
         <button class="btn btn-sm btn-outline" onclick={logout}>Sign out</button>
+      </div>
+    </div>
+
+    <!-- Your account — self-service profile for every signed-in user -->
+    <div class="card mb-6 bg-base-100 shadow-xl">
+      <div class="card-body">
+        <h2 class="card-title">Your account</h2>
+        <p class="text-sm text-base-content/60">
+          Manage your own profile. {data.me.email} · {data.me.role ?? "user"}
+        </p>
+
+        <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <!-- Edit name -->
+          <form class="flex flex-col gap-2" onsubmit={saveName}>
+            <label class="text-sm font-medium" for="acct-name">Display name</label>
+            <input
+              id="acct-name"
+              bind:value={name}
+              class="input input-sm input-bordered"
+              autocomplete="name"
+            />
+            <button class="btn btn-sm btn-primary self-start" type="submit" disabled={savingName}>
+              {savingName ? "Saving…" : "Save name"}
+            </button>
+          </form>
+
+          <!-- Change password -->
+          <form class="flex flex-col gap-2" onsubmit={savePassword}>
+            <label class="text-sm font-medium" for="acct-cpw">Change password</label>
+            <input
+              id="acct-cpw"
+              bind:value={currentPassword}
+              type="password"
+              placeholder="Current password"
+              class="input input-sm input-bordered"
+              autocomplete="current-password"
+            />
+            <input
+              bind:value={newPassword}
+              type="password"
+              placeholder="New password (min 8 chars)"
+              class="input input-sm input-bordered"
+              autocomplete="new-password"
+            />
+            <input
+              bind:value={confirmPassword}
+              type="password"
+              placeholder="Confirm new password"
+              class="input input-sm input-bordered"
+              autocomplete="new-password"
+            />
+            <button class="btn btn-sm btn-primary self-start" type="submit" disabled={savingPw}>
+              {savingPw ? "Saving…" : "Change password"}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
 
@@ -187,15 +285,6 @@
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-    {:else}
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">Welcome</h2>
-          <p class="text-base-content/70">
-            You're signed in as a regular user. Only admins can manage users.
-          </p>
         </div>
       </div>
     {/if}
