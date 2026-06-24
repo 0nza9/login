@@ -58,3 +58,23 @@ export const verification = sqliteTable("verification", {
   createdAt: integer("createdAt", { mode: "timestamp" }),
   updatedAt: integer("updatedAt", { mode: "timestamp" }),
 });
+
+// Application data: a "client" (business contact / customer). Independent of
+// the better-auth tables above, which model app *accounts*.
+export const client = sqliteTable("client", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  phone: text("phone"),
+  company: text("company"),
+  notes: text("notes"),
+  createdAt: integer("createdAt", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updatedAt", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type Client = typeof client.$inferSelect;
+export type NewClient = typeof client.$inferInsert;
