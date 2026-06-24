@@ -10,8 +10,19 @@ import { env } from "$env/dynamic/private";
 // Vercel). EMAIL_FROM must be an address on a domain you've verified in Resend;
 // the onboarding@resend.dev fallback only delivers to your own Resend account
 // email, so it's for testing only.
-const resend = new Resend(env.RESEND_API_KEY);
+//
+// Created lazily: Resend's constructor throws if the key is missing, and this
+// module is imported at build time (route analysis) where env vars aren't set —
+// instantiating at module load would break the build.
 const FROM = env.EMAIL_FROM ?? "onboarding@resend.dev";
+let resend: Resend | null = null;
+function getResend(): Resend {
+  if (!resend) {
+    if (!env.RESEND_API_KEY) throw new Error("RESEND_API_KEY is not set");
+    resend = new Resend(env.RESEND_API_KEY);
+  }
+  return resend;
+}
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
@@ -37,7 +48,7 @@ export const auth = betterAuth({
     // reset token and points at our /reset-password page (see redirectTo on the
     // client). The reset page reads the token and calls resetPassword().
     sendResetPassword: async ({ user, url }) => {
-      await resend.emails.send({
+      await getResend().emails.send({
         from: FROM,
         to: user.email,
         subject: "Reset your password",
