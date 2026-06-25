@@ -106,6 +106,8 @@
         <a href="/" class="btn btn-sm btn-ghost">← Back</a>
         {#if data.isAdmin}
           <a href="/clients" class="btn btn-sm btn-outline">Clients</a>
+          <a href="/glass-types" class="btn btn-sm btn-outline">Glass types</a>
+          <a href="/orders" class="btn btn-sm btn-outline">Orders</a>
         {/if}
         <button class="btn btn-sm btn-outline" onclick={logout}>Sign out</button>
       </div>
