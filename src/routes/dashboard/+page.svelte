@@ -8,6 +8,8 @@
 
   let { data }: { data: PageData } = $props();
 
+  let createDialog = $state<HTMLDialogElement>();
+
   // --- Toast feedback -------------------------------------------------------
   type Toast = { id: number; type: "success" | "error"; msg: string };
   let toasts = $state<Toast[]>([]);
@@ -25,15 +27,21 @@
   // admin can't fire overlapping edits before the table refreshes.
   let busy = $state(false);
 
-  // Shared enhance handler: surfaces server success/failure as a toast,
-  // keeps the form's typed value (reset: false), and refreshes the table.
-  function action(successMsg: string): SubmitFunction {
+  // Shared enhance handler: surfaces server success/failure as a toast, keeps
+  // the form's typed value (reset: false by default), refreshes the table, and
+  // optionally runs onSuccess (e.g. close a modal/drawer).
+  function action(
+    successMsg: string,
+    opts: { reset?: boolean; onSuccess?: () => void } = {},
+  ): SubmitFunction {
     return () => {
       busy = true;
       return async ({ result, update }) => {
-        await update({ reset: false });
-        if (result.type === "success") notify("success", successMsg);
-        else if (result.type === "failure")
+        await update({ reset: opts.reset ?? false });
+        if (result.type === "success") {
+          notify("success", successMsg);
+          opts.onSuccess?.();
+        } else if (result.type === "failure")
           notify("error", String(result.data?.message ?? "Something went wrong."));
         else if (result.type === "error") notify("error", "Request failed.");
         await invalidateAll();
@@ -84,10 +92,58 @@
     notify("success", "Password changed.");
     currentPassword = newPassword = confirmPassword = "";
   }
+
+  // --- URL helpers (preserve search/page while toggling drawer/paging) -----
+  function buildUrl(overrides: Record<string, string | number | null>) {
+    const p = new URLSearchParams();
+    if (data.q) p.set("q", data.q);
+    if (data.field !== "email") p.set("field", data.field);
+    if (data.page > 1) p.set("page", String(data.page));
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v === null || v === "") p.delete(k);
+      else p.set(k, String(v));
+    }
+    const s = p.toString();
+    return s ? `/dashboard?${s}` : "/dashboard";
+  }
+  const openManage = (id: string) => goto(buildUrl({ manage: id }));
+  const closeManage = () => goto(buildUrl({ manage: null }));
+
+  // --- Impersonation (client-side so the session cookie swaps correctly) ---
+  async function impersonate(userId: string) {
+    const { error } = await authClient.admin.impersonateUser({ userId });
+    if (error) return notify("error", error.message ?? "Could not impersonate.");
+    await goto("/dashboard");
+    await invalidateAll();
+  }
+  async function stopImpersonating() {
+    await authClient.admin.stopImpersonating();
+    await goto("/dashboard");
+    await invalidateAll();
+  }
+
+  // --- Pagination derived state -------------------------------------------
+  const totalPages = $derived(Math.max(1, Math.ceil(data.total / data.pageSize)));
+  const rangeStart = $derived(data.total === 0 ? 0 : (data.page - 1) * data.pageSize + 1);
+  const rangeEnd = $derived(Math.min(data.page * data.pageSize, data.total));
+
+  function fmtDate(d: string | number | Date | null | undefined) {
+    if (!d) return "—";
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? "—" : date.toLocaleString();
+  }
 </script>
 
 <div class="min-h-screen bg-base-200 p-6">
   <div class="mx-auto max-w-5xl">
+    <!-- Impersonation banner -->
+    {#if data.impersonating}
+      <div class="alert alert-warning mb-4">
+        <span>You are impersonating <strong>{data.me.name}</strong> ({data.me.email}).</span>
+        <button class="btn btn-sm" onclick={stopImpersonating}>Stop impersonating</button>
+      </div>
+    {/if}
+
     <!-- Header -->
     <div class="mb-6 flex items-center justify-between">
       <div>
@@ -170,12 +226,53 @@
     </div>
 
     {#if data.isAdmin}
+      <!-- Stats -->
+      {#if data.stats}
+        <div class="stats mb-6 w-full shadow">
+          <div class="stat">
+            <div class="stat-title">Total users</div>
+            <div class="stat-value text-primary">{data.stats.total}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Admins</div>
+            <div class="stat-value">{data.stats.admins}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-title">Banned</div>
+            <div class="stat-value text-error">{data.stats.banned}</div>
+          </div>
+        </div>
+      {/if}
+
       <div class="card bg-base-100 shadow-xl">
         <div class="card-body">
-          <h2 class="card-title">Users</h2>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">Users</h2>
+            <button class="btn btn-sm btn-primary" onclick={() => createDialog?.showModal()}>
+              + New user
+            </button>
+          </div>
           <p class="text-sm text-base-content/60">
             Only admins can see and edit this. Changes are enforced server-side.
           </p>
+
+          <!-- Search -->
+          <form method="GET" class="mt-2 flex flex-wrap gap-2">
+            <input
+              name="q"
+              value={data.q}
+              placeholder="Search…"
+              class="input input-sm input-bordered w-56"
+            />
+            <select name="field" value={data.field} class="select select-sm select-bordered">
+              <option value="email">Email</option>
+              <option value="name">Name</option>
+            </select>
+            <button class="btn btn-sm" type="submit">Search</button>
+            {#if data.q}
+              <a href="/dashboard" class="btn btn-sm btn-ghost">Clear</a>
+            {/if}
+          </form>
 
           <div class="overflow-x-auto">
             <table class="table">
@@ -243,27 +340,17 @@
                       {/if}
                     </td>
 
-                    <!-- Ban / unban / delete -->
+                    <!-- Actions -->
                     <td class="text-right">
-                      {#if !isMe}
-                        <div class="flex justify-end gap-1">
-                          {#if u.banned}
-                            <form
-                              method="POST"
-                              action="?/unban"
-                              use:enhance={action("User unbanned.")}
-                            >
-                              <input type="hidden" name="userId" value={u.id} />
-                              <button class="btn btn-sm btn-ghost" disabled={busy}>Unban</button>
-                            </form>
-                          {:else}
-                            <form method="POST" action="?/ban" use:enhance={action("User banned.")}>
-                              <input type="hidden" name="userId" value={u.id} />
-                              <button class="btn btn-sm btn-ghost text-warning" disabled={busy}>
-                                Ban
-                              </button>
-                            </form>
-                          {/if}
+                      <div class="flex justify-end gap-1">
+                        <button
+                          class="btn btn-sm btn-ghost"
+                          disabled={busy}
+                          onclick={() => openManage(u.id)}
+                        >
+                          Manage
+                        </button>
+                        {#if !isMe}
                           <form method="POST" action="?/remove" use:enhance={action("User deleted.")}>
                             <input type="hidden" name="userId" value={u.id} />
                             <button
@@ -277,15 +364,46 @@
                               Delete
                             </button>
                           </form>
-                        </div>
-                      {:else}
-                        <span class="text-xs text-base-content/40">that's you</span>
-                      {/if}
+                        {:else}
+                          <span class="self-center text-xs text-base-content/40">that's you</span>
+                        {/if}
+                      </div>
                     </td>
                   </tr>
                 {/each}
+                {#if data.users.length === 0}
+                  <tr>
+                    <td colspan="5" class="text-center text-base-content/50">No users found.</td>
+                  </tr>
+                {/if}
               </tbody>
             </table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="mt-2 flex items-center justify-between">
+            <span class="text-sm text-base-content/60">
+              {rangeStart}–{rangeEnd} of {data.total}
+            </span>
+            <div class="join">
+              <a
+                class="btn btn-sm join-item"
+                class:btn-disabled={data.page <= 1}
+                href={buildUrl({ page: data.page - 1, manage: null })}
+              >
+                «
+              </a>
+              <span class="btn btn-sm join-item pointer-events-none">
+                Page {data.page} / {totalPages}
+              </span>
+              <a
+                class="btn btn-sm join-item"
+                class:btn-disabled={data.page >= totalPages}
+                href={buildUrl({ page: data.page + 1, manage: null })}
+              >
+                »
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -301,3 +419,178 @@
     {/each}
   </div>
 </div>
+
+<!-- Create user modal -->
+<dialog bind:this={createDialog} class="modal">
+  <div class="modal-box">
+    <h3 class="text-lg font-bold">Create user</h3>
+    <form
+      method="POST"
+      action="?/createUser"
+      class="mt-4 flex flex-col gap-3"
+      use:enhance={action("User created.", { reset: true, onSuccess: () => createDialog?.close() })}
+    >
+      <input name="name" placeholder="Name" required class="input input-bordered w-full" />
+      <input
+        name="email"
+        type="email"
+        placeholder="email@example.com"
+        required
+        class="input input-bordered w-full"
+      />
+      <input
+        name="password"
+        type="password"
+        placeholder="Password (min 8)"
+        required
+        minlength="8"
+        class="input input-bordered w-full"
+      />
+      <select name="role" class="select select-bordered w-full">
+        <option value="user">user</option>
+        <option value="admin">admin</option>
+      </select>
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost" onclick={() => createDialog?.close()}>
+          Cancel
+        </button>
+        <button type="submit" class="btn btn-primary" disabled={busy}>Create</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<!-- Manage user drawer -->
+{#if data.selectedUser}
+  {@const su = data.selectedUser}
+  {@const isMe = su.id === data.me.id}
+  <div class="fixed inset-0 z-40 flex justify-end">
+    <button class="absolute inset-0 bg-black/40" onclick={closeManage} aria-label="Close"></button>
+    <div class="relative z-10 h-full w-full max-w-md overflow-y-auto bg-base-100 p-6 shadow-2xl">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="text-lg font-bold">{su.name}</h3>
+          <p class="text-sm text-base-content/60">{su.email}</p>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick={closeManage}>✕</button>
+      </div>
+
+      <!-- Impersonate -->
+      <div class="divider">Session</div>
+      <button
+        class="btn btn-sm btn-outline w-full"
+        disabled={isMe}
+        onclick={() => impersonate(su.id)}
+      >
+        Login as this user
+      </button>
+
+      <!-- Active sessions -->
+      <div class="mt-4">
+        <div class="mb-1 flex items-center justify-between">
+          <span class="text-sm font-medium">Active sessions ({data.sessions.length})</span>
+          {#if data.sessions.length > 0}
+            <form method="POST" action="?/revokeSessions" use:enhance={action("Sessions revoked.")}>
+              <input type="hidden" name="userId" value={su.id} />
+              <button class="btn btn-xs btn-ghost text-error" disabled={busy}>Revoke all</button>
+            </form>
+          {/if}
+        </div>
+        <ul class="space-y-1 text-xs text-base-content/60">
+          {#each data.sessions as s (s.id)}
+            <li class="rounded bg-base-200 p-2">
+              <div>{s.ipAddress || "unknown IP"}</div>
+              <div class="truncate">{s.userAgent || "unknown device"}</div>
+              <div>expires {fmtDate(s.expiresAt)}</div>
+            </li>
+          {:else}
+            <li>No active sessions.</li>
+          {/each}
+        </ul>
+      </div>
+
+      <!-- Set password -->
+      <div class="divider">Password</div>
+      <form
+        method="POST"
+        action="?/setPassword"
+        class="flex gap-2"
+        use:enhance={action("Password updated.", { reset: true })}
+      >
+        <input type="hidden" name="userId" value={su.id} />
+        <input
+          name="newPassword"
+          type="password"
+          placeholder="New password (min 8)"
+          minlength="8"
+          required
+          class="input input-sm input-bordered flex-1"
+        />
+        <button class="btn btn-sm" disabled={busy}>Set</button>
+      </form>
+
+      <!-- Ban / unban -->
+      <div class="divider">Access</div>
+      {#if su.banned}
+        <div class="flex items-center justify-between">
+          <span class="badge badge-error">banned</span>
+          <form method="POST" action="?/unban" use:enhance={action("User unbanned.")}>
+            <input type="hidden" name="userId" value={su.id} />
+            <button class="btn btn-sm" disabled={busy}>Unban</button>
+          </form>
+        </div>
+        {#if su.banReason}<p class="mt-2 text-xs text-base-content/60">Reason: {su.banReason}</p>{/if}
+        {#if su.banExpires}<p class="text-xs text-base-content/60">Until: {fmtDate(su.banExpires)}</p>{/if}
+      {:else if isMe}
+        <p class="text-sm text-base-content/50">You can't ban yourself.</p>
+      {:else}
+        <form
+          method="POST"
+          action="?/ban"
+          class="flex flex-col gap-2"
+          use:enhance={action("User banned.", { reset: true })}
+        >
+          <input type="hidden" name="userId" value={su.id} />
+          <input
+            name="banReason"
+            placeholder="Reason (optional)"
+            class="input input-sm input-bordered w-full"
+          />
+          <label class="flex items-center gap-2 text-sm">
+            <span class="text-base-content/60">Expires in</span>
+            <input
+              name="banDays"
+              type="number"
+              min="0"
+              placeholder="days (0 = permanent)"
+              class="input input-sm input-bordered w-40"
+            />
+          </label>
+          <button class="btn btn-sm btn-warning" disabled={busy}>Ban user</button>
+        </form>
+      {/if}
+
+      <!-- Delete -->
+      {#if !isMe}
+        <div class="divider">Danger</div>
+        <form
+          method="POST"
+          action="?/remove"
+          use:enhance={action("User deleted.", { onSuccess: closeManage })}
+        >
+          <input type="hidden" name="userId" value={su.id} />
+          <button
+            class="btn btn-sm btn-error btn-outline w-full"
+            disabled={busy}
+            onclick={(e) => {
+              if (!confirm("Delete this user permanently?")) e.preventDefault();
+            }}
+          >
+            Delete user
+          </button>
+        </form>
+      {/if}
+    </div>
+  </div>
+{/if}

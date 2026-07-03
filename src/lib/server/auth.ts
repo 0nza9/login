@@ -27,14 +27,22 @@ function getResend(): Resend {
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
 
-  // localhost and 127.0.0.1 are different origins to the browser. Trust both on
-  // the dev port so sign-in works regardless of which one you type (avoids the
-  // "Invalid origin" error). The Vercel production origin is added from
-  // BETTER_AUTH_URL so sign-in works on the deployed site too.
+  // Better Auth rejects any request whose browser Origin isn't listed here
+  // ("Invalid origin"). We trust:
+  //  - localhost / 127.0.0.1 on the dev port (both are distinct origins),
+  //  - the deployed production origin via BETTER_AUTH_URL,
+  //  - any extra origins from TRUSTED_ORIGINS (comma-separated). Put your prod
+  //    domain and/or a preview wildcard there, e.g.:
+  //      TRUSTED_ORIGINS=https://onzaaa.vercel.app,https://*.vercel.app
   trustedOrigins: [
     "http://localhost:5175",
     "http://127.0.0.1:5175",
     ...(env.BETTER_AUTH_URL ? [env.BETTER_AUTH_URL] : []),
+    ...(env.TRUSTED_ORIGINS
+      ? env.TRUSTED_ORIGINS.split(",")
+          .map((o) => o.trim())
+          .filter(Boolean)
+      : []),
   ],
 
   database: drizzleAdapter(db, {
