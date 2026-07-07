@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(node -e \"const {createClient}=require\\('@libsql/client'\\); const c=createClient\\({url:'file:sqlite.db'}\\); c.execute\\(\\\\\"SELECT name FROM sqlite_master WHERE type='table' ORDER BY name\\\\\"\\).then\\(r=>{console.log\\('Tables:', r.rows.map\\(x=>x.name\\).join\\(', '\\)\\)}\\).catch\\(e=>console.error\\(e.message\\)\\)\")"
     ]
   }
 }
